@@ -12,10 +12,8 @@
  * Example php artisan product:import merchant_01.csv
  */
 
-namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use mysqli;
 
 class PreviousCommand extends Command
 {

@@ -6,7 +6,6 @@ declare(strict_types=1);
  * example $schedule->command('product:import 1 merchant_01.csv --isolated')->everyFiveMinutes();
  */
 
-namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
@@ -14,7 +13,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 
 /**
  * @phpstan-type ProductRow array{
@@ -102,10 +100,10 @@ class ImportProductsFromCsv extends Command implements Isolatable
     private function openImportStream()
     {
         $file = basename($this->argument('file')); // get only filename to prevent traversal attack
-        $path = config('filesystems.imports_path').'/'.$file;
+        $path = \App\Console\Commands\config('filesystems.imports_path') .'/'.$file;
 
         // Disk read from 'local' today. S3 is possible check the config filesystem.php
-        $disk = Storage::disk(config('filesystems.imports_disk'));
+        $disk = Storage::disk(\App\Console\Commands\config('filesystems.imports_disk'));
 
         // Check the File exists or not
         if (! $disk->exists($path)) {
@@ -237,7 +235,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
     {
         [$name, $color, $ean, $price, $quantity] = $row;
 
-        $now = now(); // one time
+        $now = \App\Console\Commands\now(); // one time
 
         return [
             'merchant_id' => $merchantId,
