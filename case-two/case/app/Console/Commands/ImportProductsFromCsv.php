@@ -23,7 +23,7 @@ use RuntimeException;
  *     color: string|null,
  *     ean: string,
  *     price: string,
- *     quantity: string,
+ *     quantity: int,
  *     created_at: Carbon,
  *     updated_at: Carbon
  *     }
@@ -71,6 +71,49 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
+     * Get Merchant id and check exist in database or not
+     */
+    private function getMerchantId(): int
+    {
+        $merchantId = $this->argument('merchant');
+
+        if (!ctype_digit($merchantId)) {
+            throw new RuntimeException("Merchant Id must be an integer: {$merchantId}");
+        }
+
+        $merchantId = (int)$merchantId;
+
+        if (!DB::table('merchants')->where('id', $merchantId)->exists()) {
+            throw new RuntimeException("Merchant Id {$merchantId} does not exists");
+        }
+
+        return $merchantId;
+
+    }
+
+    /**
+     * Opens the merchant's CSV file as a stream (local disk today, S3 later).
+     * @return resource
+     */
+    private function openImportStream()
+    {
+        $file = basename($this->argument('file')); // get only filename to prevent traversal attack
+        $path = config('filesystems.imports_path') . '/' . $file;
+
+        // Disk read from 'local' today. S3 is possible check the config filesystem.php
+        $disk = Storage::disk(config('filesystems.imports_disk'));
+
+        // Check the File exists or not
+        if (!$disk->exists($path)) {
+            throw new RuntimeException("File {$file} does not exists.");
+        }
+
+        // If it is null throw an exception.
+        return $disk->readStream($path)
+            ?? throw new RuntimeException("File {$file} is not readable. Could not opne it");
+    }
+
+    /**
      * @param resource $stream
      */
     private function importRows($stream, int $merchantId): ImportResult
@@ -113,27 +156,19 @@ class ImportProductsFromCsv extends Command implements Isolatable
         return new ImportResult($imported, $errors);
     }
 
-    private function report(ImportResult $result, int $merchantId): void
+    /**
+     * @param list<string|null> $row
+     * @return list<string>|null  null = blank line, skip it
+     */
+    private function normalizeRow(array $row): ?array
     {
-        if ($result->errors !== []) {
-            $this->warn('Skipped rows: ' . count($result->errors));
-            $this->table(['Line', 'Reason'], $result->errors);
+        if ($row === [null]) {
+            return null; // blank line: not an error, just skip
         }
 
-        $context = [
-            'merchant_id' => $merchantId,
-            'imported' => $result->imported,
-            'skipped' => count($result->errors),
-        ];
-
-        if ($result->imported === 0) {
-            $this->error('No rows were imported.');
-            Log::error('Product import failed: nothing imported', $context);
-            return;
-        }
-
-        Log::info('Product import finished', $context);
+        return array_map(static fn(?string $value): string => trim($value ?? ''), $row);
     }
+
 
     /**
      * Row is already normalized: trimmed, blank lines skipped.
@@ -165,49 +200,6 @@ class ImportProductsFromCsv extends Command implements Isolatable
         }
 
         return null;
-    }
-
-    /**
-     * Opens the merchant's CSV file as a stream (local disk today, S3 later).
-     * @return resource
-     */
-    private function openImportStream()
-    {
-        $file = basename($this->argument('file')); // get only filename to prevent traversal attack
-        $path = config('filesystems.imports_path') . '/' . $file;
-
-        // Disk read from 'local' today. S3 is possible check the config filesystem.php
-        $disk = Storage::disk(config('filesystems.imports_disk'));
-
-        // Check the File exists or not
-        if (!$disk->exists($path)) {
-            throw new RuntimeException("File {$file} does not exists.");
-        }
-
-        // If it is null throw an exception.
-        return $disk->readStream($path)
-            ?? throw new RuntimeException("File {$file} is not readable. Could not opne it");
-    }
-
-    /**
-     * Get Merchant id and check exist in database or not
-     */
-    private function getMerchantId(): int
-    {
-        $merchantId = $this->argument('merchant');
-
-        if (!ctype_digit($merchantId)) {
-            throw new RuntimeException("Merchant Id must be an integer: {$merchantId}");
-        }
-
-        $merchantId = (int)$merchantId;
-
-        if (!DB::table('merchants')->where('id', $merchantId)->exists()) {
-            throw new RuntimeException("Merchant Id {$merchantId} does not exists");
-        }
-
-        return $merchantId;
-
     }
 
     /**
@@ -247,17 +239,26 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
         return count($batch);
     }
-
-    /**
-     * @param list<string|null> $row
-     * @return list<string>|null  null = blank line, skip it
-     */
-    private function normalizeRow(array $row): ?array
+    private function report(ImportResult $result, int $merchantId): void
     {
-        if ($row === [null]) {
-            return null; // blank line: not an error, just skip
+        if ($result->errors !== []) {
+            $this->warn('Skipped rows: ' . count($result->errors));
+            $this->table(['Line', 'Reason'], $result->errors);
         }
 
-        return array_map(static fn(?string $value): string => trim($value ?? ''), $row);
+        $context = [
+            'merchant_id' => $merchantId,
+            'imported' => $result->imported,
+            'skipped' => count($result->errors),
+        ];
+
+        if ($result->imported === 0) {
+            $this->error('No rows were imported.');
+            Log::error('Product import failed: nothing imported', $context);
+            return;
+        }
+
+        Log::info('Product import finished', $context);
     }
+
 }
