@@ -48,6 +48,7 @@ it('imports every row of a file without a header row', function () {
     ]);
 
     artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
+        ->expectsOutput('Imported 2 products')
         ->assertSuccessful();
 
     assertDatabaseCount('products', 2);
@@ -298,19 +299,82 @@ it('counts blank lines in the reported line numbers', function () {
         ->assertSuccessful();
 });
 
-it('reports a header row as a skipped row', function () {
+it('skips a header on the first line without reporting it as an error', function (string $header) {
     Storage::fake('imports');
     $merchantId = createMerchant();
     putImportFile('products.csv', [
-        'name,color,ean,price,quantity',
+        $header,
         'T-Shirt,red,4006381333931,19.99,10',
     ]);
 
     artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
-        ->expectsTable(['Line', 'Reason'], [[1, "invalid ean 'ean'"]])
+        ->doesntExpectOutputToContain('Skipped rows')
+        ->expectsOutput('Imported 1 products')
         ->assertSuccessful();
 
     assertDatabaseCount('products', 1);
+    assertDatabaseHas('products', ['merchant_id' => $merchantId, 'ean' => '4006381333931']);
+})->with([
+    'lowercase' => 'name,color,ean,price,quantity',
+    'uppercase' => 'NAME,COLOR,EAN,PRICE,QUANTITY',
+    'padded with spaces' => ' name , color , ean , price , quantity ',
+    'prefixed with an excel utf-8 bom' => "\u{FEFF}name,color,ean,price,quantity",
+]);
+
+it('reports a header that is not on the first line as an invalid row', function () {
+    Storage::fake('imports');
+    $merchantId = createMerchant();
+    putImportFile('products.csv', [
+        'T-Shirt,red,4006381333931,19.99,10',
+        'name,color,ean,price,quantity',
+    ]);
+
+    artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
+        ->expectsTable(['Line', 'Reason'], [[2, "invalid ean 'ean'"]])
+        ->assertSuccessful();
+
+    assertDatabaseCount('products', 1);
+});
+
+it('reports a header with columns in a different order as an invalid row', function () {
+    Storage::fake('imports');
+    $merchantId = createMerchant();
+    putImportFile('products.csv', [
+        'ean,name,color,price,quantity',
+        'T-Shirt,red,4006381333931,19.99,10',
+    ]);
+
+    artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
+        ->expectsTable(['Line', 'Reason'], [[1, "invalid ean 'color'"]])
+        ->assertSuccessful();
+
+    assertDatabaseCount('products', 1);
+});
+
+it('removes an excel utf-8 bom from the first cell of a file without a header', function () {
+    Storage::fake('imports');
+    $merchantId = createMerchant();
+    putImportFile('products.csv', [
+        "\u{FEFF}T-Shirt,red,4006381333931,19.99,10",
+    ]);
+
+    artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
+        ->assertSuccessful();
+
+    assertDatabaseHas('products', ['merchant_id' => $merchantId, 'name' => 'T-Shirt']);
+});
+
+it('fails when the file contains only a header', function () {
+    Storage::fake('imports');
+    $merchantId = createMerchant();
+    putImportFile('products.csv', ['name,color,ean,price,quantity']);
+
+    artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
+        ->doesntExpectOutputToContain('Skipped rows')
+        ->expectsOutputToContain('No rows were imported.')
+        ->assertFailed();
+
+    assertDatabaseCount('products', 0);
 });
 
 it('fails and logs an error when no row could be imported', function () {
@@ -329,6 +393,7 @@ it('fails and logs an error when no row could be imported', function () {
 
     artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
         ->expectsOutputToContain('No rows were imported.')
+        ->doesntExpectOutputToContain('Imported')
         ->assertFailed();
 
     assertDatabaseCount('products', 0);
@@ -429,4 +494,20 @@ it('skips an isolated import while the same merchant is already importing', func
 
     assertDatabaseCount('products', 1);
     assertDatabaseHas('products', ['merchant_id' => $freeMerchantId]);
+});
+
+// EXCEL TEST
+it('skips the header line', function () {
+    Storage::fake('imports');
+    $merchantId = createMerchant();
+    putImportFile('products.csv', [
+        "\u{FEFF}Name,Color,EAN,Price,Quantity",
+        'T-Shirt,red,4006381333931,19.99,10',
+    ]);
+
+    artisan('product:import', ['merchant' => (string) $merchantId, 'file' => 'products.csv'])
+        ->doesntExpectOutputToContain('Skipped rows')
+        ->assertSuccessful();
+
+    assertDatabaseCount('products', 1);
 });

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 /**
@@ -15,7 +16,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
-
 /**
  * @phpstan-type ProductRow array{
  *     merchant_id: int,
@@ -31,9 +31,12 @@ use RuntimeException;
 class ImportProductsFromCsv extends Command implements Isolatable
 {
     protected $signature = 'product:import {merchant : The Merchant Id} {file}';
+
     protected $description = 'Import products from CSV';
 
     private const int BATCH_SIZE = 500;
+
+    private const array EXPECTED_HEADER = ['name', 'color', 'ean', 'price', 'quantity'];
 
     /**
      * Lock per merchant: the same merchant cannot import twice at the same time,
@@ -55,9 +58,9 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
         } catch (RuntimeException $e) {
             $this->error($e->getMessage());
+
             return self::FAILURE;
         }
-
 
         try {
             $result = $this->importRows($stream, $merchantId);
@@ -77,13 +80,13 @@ class ImportProductsFromCsv extends Command implements Isolatable
     {
         $merchantId = $this->argument('merchant');
 
-        if (!ctype_digit($merchantId)) {
+        if (! ctype_digit($merchantId)) {
             throw new RuntimeException("Merchant Id must be an integer: {$merchantId}");
         }
 
-        $merchantId = (int)$merchantId;
+        $merchantId = (int) $merchantId;
 
-        if (!DB::table('merchants')->where('id', $merchantId)->exists()) {
+        if (! DB::table('merchants')->where('id', $merchantId)->exists()) {
             throw new RuntimeException("Merchant Id {$merchantId} does not exists");
         }
 
@@ -93,18 +96,19 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
     /**
      * Opens the merchant's CSV file as a stream (local disk today, S3 later).
+     *
      * @return resource
      */
     private function openImportStream()
     {
         $file = basename($this->argument('file')); // get only filename to prevent traversal attack
-        $path = config('filesystems.imports_path') . '/' . $file;
+        $path = config('filesystems.imports_path').'/'.$file;
 
         // Disk read from 'local' today. S3 is possible check the config filesystem.php
         $disk = Storage::disk(config('filesystems.imports_disk'));
 
         // Check the File exists or not
-        if (!$disk->exists($path)) {
+        if (! $disk->exists($path)) {
             throw new RuntimeException("File {$file} does not exists.");
         }
 
@@ -114,7 +118,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
-     * @param resource $stream
+     * @param  resource  $stream
      */
     private function importRows($stream, int $merchantId): ImportResult
     {
@@ -132,10 +136,15 @@ class ImportProductsFromCsv extends Command implements Isolatable
                 continue;
             }
 
+            if ($lineNumber === 1 && $this->isHeader($row)) {
+                continue; // header line is optional
+            }
+
             $error = $this->validateRow($row);
 
             if ($error !== null) {
                 $errors[] = ['line' => $lineNumber, 'reason' => $error]; // to collect the errors but all of them goes to RAM.
+
                 continue;
             }
 
@@ -157,8 +166,8 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
-     * @param list<string|null> $row
-     * @return list<string>|null  null = blank line, skip it
+     * @param  list<string|null>  $row
+     * @return list<string>|null null = blank line, skip it
      */
     private function normalizeRow(array $row): ?array
     {
@@ -166,36 +175,52 @@ class ImportProductsFromCsv extends Command implements Isolatable
             return null; // blank line: not an error, just skip
         }
 
-        return array_map(static fn(?string $value): string => trim($value ?? ''), $row);
+        $cells = array_map(static fn (?string $value): string => trim($value ?? ''), $row);
+
+        // Microsoft Excel puts an invisible UTF-8 BOM before the first cell of the file
+        if (str_starts_with($cells[0], "\u{FEFF}")) {
+            $cells[0] = substr($cells[0], 3);
+        }
+
+        return $cells;
     }
 
+    /**
+     * True when the row is the optional header line -> name,color,ean,price,quantity
+     *
+     * @param  list<string>  $row
+     */
+    private function isHeader(array $row): bool
+    {
+        return array_map(strtolower(...), $row) === self::EXPECTED_HEADER;
+    }
 
     /**
      * Row is already normalized: trimmed, blank lines skipped.
      *
-     * @param list<string> $row
+     * @param  list<string>  $row
      */
     private function validateRow(array $row): ?string
     {
         if (count($row) !== 5) {
-            return 'expected 5 columns, got ' . count($row);
+            return 'expected 5 columns, got '.count($row);
         }
 
         [$name, $color, $ean, $price, $quantity] = $row;
 
         if ($name === '') {
-            return "name is empty";
+            return 'name is empty';
         }
 
-        if (!ctype_digit($ean) || strlen($ean) < 8 || strlen($ean) > 14) {
+        if (! ctype_digit($ean) || strlen($ean) < 8 || strlen($ean) > 14) {
             return "invalid ean '{$ean}'";
         }
 
-        if (!is_numeric($price) || (float)$price < 0) {
+        if (! is_numeric($price) || (float) $price < 0) {
             return "invalid price '{$price}'";
         }
 
-        if (!ctype_digit($quantity)) {
+        if (! ctype_digit($quantity)) {
             return "invalid quantity '{$quantity}'";
         }
 
@@ -205,7 +230,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
     /**
      * Row is already validated by validateRow().
      *
-     * @param list<string> $row
+     * @param  list<string>  $row
      * @return ProductRow
      */
     private function mapRow(array $row, int $merchantId): array
@@ -220,14 +245,14 @@ class ImportProductsFromCsv extends Command implements Isolatable
             'color' => $color === '' ? null : $color,
             'ean' => $ean,
             'price' => $price,
-            'quantity' => (int)$quantity,
+            'quantity' => (int) $quantity,
             'created_at' => $now,
             'updated_at' => $now,
         ];
     }
 
     /**
-     * @param list<ProductRow> $batch
+     * @param  list<ProductRow>  $batch
      */
     private function flushBatch(array $batch): int
     {
@@ -239,10 +264,11 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
         return count($batch);
     }
+
     private function report(ImportResult $result, int $merchantId): void
     {
         if ($result->errors !== []) {
-            $this->warn('Skipped rows: ' . count($result->errors));
+            $this->warn('Skipped rows: '.count($result->errors));
             $this->table(['Line', 'Reason'], $result->errors);
         }
 
@@ -255,10 +281,11 @@ class ImportProductsFromCsv extends Command implements Isolatable
         if ($result->imported === 0) {
             $this->error('No rows were imported.');
             Log::error('Product import failed: nothing imported', $context);
+
             return;
         }
 
+        $this->info("Imported {$result->imported} products"); // Terminal
         Log::info('Product import finished', $context);
     }
-
 }
