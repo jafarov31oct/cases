@@ -71,4 +71,36 @@ class ImportProductsFromCsv extends Command
         return $merchantId;
 
     }
+
+    /**
+     * @param array $row
+     * @param int $merchantId
+     * @return array
+     */
+    private function mapRow(array $row, int $merchantId): array
+    {
+        [$name, $color, $ean, $price, $quantity] = array_map(trim(...), $row);
+
+        $now = now(); // one time
+
+        return [
+            'merchant_id' => $merchantId,
+            'name' => $name,
+            'color' => $color === '' ? null : $color,
+            'ean' => $ean,
+            'price' => $price,
+            'quantity' => (int) $quantity,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+    }
+
+    private function saveProducts(array $products): void
+    {
+        DB::table('products')->upsert(
+            [$products],
+            ['merchant_id', 'ean'],
+            ['name', 'color', 'price', 'quantity', 'updated_at']
+        );
+    }
 }
