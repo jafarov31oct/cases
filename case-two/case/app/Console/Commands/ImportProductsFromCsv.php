@@ -12,43 +12,72 @@ class ImportProductsFromCsv extends Command
 {
     protected $signature = 'product:import {merchant : The Merchant Id} {file}';
     protected $description = 'Import products from CSV';
+
     /**
      * Execute the console command.
      */
     public function handle(): int
     {
-        $merchantId = $this->getMerchantId()
+        try {
 
-        $file = basename($this->argument('file')); // get only filename to prevent traversal attack
-        $path = config('filesystems.imports.path') . '/' . $file;
-        $disk = Storage::disk(config('filesystems.imports.disk'));
+            $merchantId = $this->getMerchantId();
+            $stream = $this->openImportStream();
 
-        // Check the File exists or not
-        if(!$disk->exists($path)) {
-            $this->error("File {$file} does not exists");
+        } catch (RuntimeException $e) {
+            $this->error($e->getMessage());
             return self::FAILURE;
         }
 
-         // Read CSV using a stream
-        $stream = $disk->readStream($path);
-
-        if($stream === null){
-            $this->error("File {$file} is not readable");
-            return self::FAILURE;
-        }
 
         $lineNumber = 0;
+        $imported = 0;
 
-        try{
-            while(fgetcsv($stream, escape: '') !== false){
+        try {
+            while (($row = fgetcsv($stream, escape: '')) !== false) {
                 $lineNumber++;
+
+                if ($row === [null]) {
+                    continue; // blank line: not an error, just skip
+                }
+
+                if (count($row) !== 5) {
+                    $this->warn("Line {$lineNumber}: expected 5 columns, got " . count($row));
+                    continue;
+                }
+
+                $product = $this->mapRow($row, $merchantId);
+                $this->saveProducts($product);
+                $imported++;
+
             }
         } finally {
             fclose($stream);
         }
 
-        $this->info("Read {$lineNumber} lines}");
+        $this->info("Read {$lineNumber} lines, imported {$imported} products");
         return self::SUCCESS;
+    }
+
+    /**
+     * Opens the merchant's CSV file as a stream (local disk today, S3 later).
+     * @return resource
+     */
+    private function openImportStream()
+    {
+        $file = basename($this->argument('file')); // get only filename to prevent traversal attack
+        $path = config('filesystems.imports_path') . '/' . $file;
+
+        // Disk read from 'local' today. S3 is possible check the config filesystem.php
+        $disk = Storage::disk(config('filesystems.imports_disk'));
+
+        // Check the File exists or not
+        if (!$disk->exists($path)) {
+            throw new RuntimeException("File {$file} does not exists.");
+        }
+
+        // If it is null throw and Exception.
+        return $disk->readStream($path)
+            ?? throw new RuntimeException("File {$file} is not readable. Could not opne it");
     }
 
     /*
@@ -58,13 +87,13 @@ class ImportProductsFromCsv extends Command
     {
         $merchantId = $this->argument('merchant');
 
-        if(!ctype_digit($merchantId)) {
+        if (!ctype_digit($merchantId)) {
             throw new RuntimeException("Merchant Id must be an integer: {$merchantId}");
         }
 
         $merchantId = (int)$merchantId;
 
-        if(!DB::table('merchants')->where('id', $merchantId)->exists()) {
+        if (!DB::table('merchants')->where('id', $merchantId)->exists()) {
             throw new RuntimeException("Merchant Id {$merchantId} does not exists");
         }
 
@@ -74,8 +103,6 @@ class ImportProductsFromCsv extends Command
 
     /**
      * @param array $row
-     * @param int $merchantId
-     * @return array
      */
     private function mapRow(array $row, int $merchantId): array
     {
@@ -89,7 +116,7 @@ class ImportProductsFromCsv extends Command
             'color' => $color === '' ? null : $color,
             'ean' => $ean,
             'price' => $price,
-            'quantity' => (int) $quantity,
+            'quantity' => (int)$quantity,
             'created_at' => $now,
             'updated_at' => $now,
         ];

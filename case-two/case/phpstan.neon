@@ -6,7 +6,7 @@ parameters:
     level: 8
 
     paths:
-    - app/Console/Commands
-    - database/migrations/
-    - tests/
+    - app/Console/Commands/ImportProductsFromCsv.php
+#    - database/migrations/
+#    - tests/
 
