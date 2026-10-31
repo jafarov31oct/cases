@@ -18,7 +18,7 @@ SFTP -> File Watcher -> Import Worker -> Diffing Worker -> API Worker -> POST /b
                         staging table)     block / unblock)   retry + DLQ)
 ```
 
-- Each step runs as its own job on a separate RabbitMQ queue, and the file status (`DETECTED → IMPORTING → IMPORTED → DIFFING → DIFFED`, or `FAILED`) is tracked in `cd_steering_files` in MySQL.
+- Each step runs as its own job on a separate RabbitMQ queue, and the file status (`DETECTED → IMPORTING → IMPORTED → DIFFING → DIFFED → DONE` or `FAILED`) is tracked in `cd_steering_files` in MySQL.
 - Block requests are sent before unblock requests, so unprofitable products are blocked as early as possible.
 - Transient API errors are retried with exponential backoff and jitter; permanent errors go to a DLQ with an alert.
 
