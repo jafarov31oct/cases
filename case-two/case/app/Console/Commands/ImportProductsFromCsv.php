@@ -5,10 +5,10 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 
-class ProductImportWithCSV extends Command
+class ImportProductsFromCsv extends Command
 {
     protected $signature = 'product:import {file}';
-    protected $description = 'Import products via CSV';
+    protected $description = 'Import products from CSV';
     /**
      * Execute the console command.
      */

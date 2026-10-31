@@ -14,6 +14,8 @@ return [
     */
 
     'default' => env('FILESYSTEM_DISK', 'local'),
+    'imports_disk' => env('IMPORTS_DISK', 'local'), // today local
+    'imports_path' => env('IMPORTS_PATH', 'imports'),
 
     /*
     |--------------------------------------------------------------------------
