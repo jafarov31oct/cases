@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * example $schedule->command('product:import 1 merchant_01.csv --isolated')->everyFiveMinutes();
+ */
+
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
@@ -10,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
+
 class ImportProductsFromCsv extends Command implements Isolatable
 {
     protected $signature = 'product:import {merchant : The Merchant Id} {file}';
@@ -17,6 +22,10 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
     private const int BATCH_SIZE = 500;
 
+    /**
+     * Lock per merchant: the same merchant cannot import twice at the same time,
+     * different merchants can still run in parallel.
+     */
     public function isolatableId(): string
     {
         return $this->argument('merchant');
@@ -28,7 +37,6 @@ class ImportProductsFromCsv extends Command implements Isolatable
     public function handle(): int
     {
         try {
-
             $merchantId = $this->getMerchantId();
             $stream = $this->openImportStream();
 
@@ -38,66 +46,76 @@ class ImportProductsFromCsv extends Command implements Isolatable
         }
 
 
+        try {
+            $result = $this->importRows($stream, $merchantId);
+        } finally {
+            fclose($stream);
+        }
+
+        $this->report($result, $merchantId);
+
+        return $result->imported === 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /*
+     * @param resource $stream
+     */
+    private function importRows($stream, int $merchantId): ImportResult
+    {
         $lineNumber = 0;
         $imported = 0;
         $batch = [];
         $errors = [];
 
-        try {
-            while (($row = fgetcsv($stream, escape: '')) !== false) {
-                $lineNumber++;
+        while (($row = fgetcsv($stream, escape: '')) !== false) {
+            $lineNumber++;
 
-                if ($row === [null]) {
-                    continue; // blank line: not an error, just skip
-                }
-
-                $error = $this->validateRow($row);
-
-                if ($error !== null) {
-                    $errors[] = ['line' => $lineNumber, 'reason' => $error]; // to collect the errors but all of them goes to RAM.
-                    continue;
-                }
-
-                $batch[] = $this->mapRow($row, $merchantId);
-
-                if (count($batch) === self::BATCH_SIZE) {
-                    $this->saveProducts($batch);
-                    $imported += count($batch);
-                    $batch = [];
-                }
-
-
+            if ($row === [null]) {
+                continue; // blank line: not an error, just skip
             }
 
-            // IF the list shorter than 500 list
-            if ($batch != []) {
-                $this->saveProducts($batch); // flush the last, not-full batch
+            $error = $this->validateRow($row);
+
+            if ($error !== null) {
+                $errors[] = ['line' => $lineNumber, 'reason' => $error]; // to collect the errors but all of them goes to RAM.
+                continue;
+            }
+
+            $batch[] = $this->mapRow($row, $merchantId);
+
+            if (count($batch) === self::BATCH_SIZE) {
+                $this->saveProducts($batch);
                 $imported += count($batch);
+                $batch = [];
             }
 
-        } finally {
-            fclose($stream);
         }
 
-        $context = [
+        // IF the list shorter than 500 list
+        if ($batch != []) {
+            $this->saveProducts($batch); // flush the last, not-full batch
+            $imported += count($batch);
+        }
+
+        return new ImportResult($imported, $errors);
+    }
+
+    private function report(ImportResult $result, int $merchantId): void
+    {
+        if ($result->errors !== []) {
+            $this->warn('Skipped rows: ' . count($result->errors));
+            $this->table(['Line', 'Reason'], $result->errors);
+        }
+
+        if ($result->imported === 0) {
+            $this->error('No rows were imported.');
+        }
+
+        Log::info('Product import finished', [
             'merchant_id' => $merchantId,
-            'imported' => $imported,
-            'skipped' => count($errors),
-        ];
-
-        if ($imported === 0) {
-            $this->error('No products were imported.');
-            Log::error('Product import failed: nothing imported', $context);
-            return self::FAILURE;
-        }
-
-        if($errors !== []){
-            $this->warn('Skipped rows: ' . count($errors));
-            $this->table(['Line', 'Reason'], $errors);
-        }
-
-        $this->info("Read {$lineNumber} lines, imported {$imported} products");
-        return self::SUCCESS;
+            'imported' => $result->imported,
+            'skipped' => count($result->errors),
+        ]);
     }
 
     /**
