@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
@@ -40,6 +41,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
         $lineNumber = 0;
         $imported = 0;
         $batch = [];
+        $errors = [];
 
         try {
             while (($row = fgetcsv($stream, escape: '')) !== false) {
@@ -50,8 +52,9 @@ class ImportProductsFromCsv extends Command implements Isolatable
                 }
 
                 $error = $this->validateRow($row);
+
                 if ($error !== null) {
-                    $this->warn("Line {$lineNumber}: {$error}");
+                    $errors[] = ['line' => $lineNumber, 'reason' => $error]; // to collect the errors but all of them goes to RAM.
                     continue;
                 }
 
@@ -74,6 +77,23 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
         } finally {
             fclose($stream);
+        }
+
+        $context = [
+            'merchant_id' => $merchantId,
+            'imported' => $imported,
+            'skipped' => count($errors),
+        ];
+
+        if ($imported === 0) {
+            $this->error('No products were imported.');
+            Log::error('Product import failed: nothing imported', $context);
+            return self::FAILURE;
+        }
+
+        if($errors !== []){
+            $this->warn('Skipped rows: ' . count($errors));
+            $this->table(['Line', 'Reason'], $errors);
         }
 
         $this->info("Read {$lineNumber} lines, imported {$imported} products");
