@@ -5,7 +5,7 @@ Existing products are updated, new ones are inserted.
 
 > This folder contains only the files written for this case.
 > The full Laravel application (to run the command and the tests) is on the
-> [`case-two-laravel-app`](../../tree/case-two-laravel-app) branch.
+> [`case-two-laravel-app`](https://github.com/jafarov31oct/cases/tree/case-two-laravel-app/case-two/case) branch.
 
 ## Acceptance criteria
 
