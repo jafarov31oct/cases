@@ -57,7 +57,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
         return $result->imported === 0 ? self::FAILURE : self::SUCCESS;
     }
 
-    /*
+    /**
      * @param resource $stream
      */
     private function importRows($stream, int $merchantId): ImportResult
@@ -119,7 +119,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
-     * @param array $row
+     * @param array<int, string|null> $row
      */
     private function validateRow(array $row): ?string
     {
@@ -192,7 +192,8 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
-     * @param array $row
+     * @param array<int, string|null> $row
+     * @return array<string, mixed>
      */
     private function mapRow(array $row, int $merchantId): array
     {
@@ -212,6 +213,9 @@ class ImportProductsFromCsv extends Command implements Isolatable
         ];
     }
 
+    /**
+     * @param list<array<string, mixed>> $products
+     */
     private function saveProducts(array $products): void
     {
         DB::table('products')->upsert(
