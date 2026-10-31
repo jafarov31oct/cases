@@ -7,6 +7,8 @@ use Illuminate\Console\Command;
 
 class ProductImportWithCSV extends Command
 {
+    protected $signature = 'product:import {file}';
+    protected $description = 'Import products via CSV';
     /**
      * Execute the console command.
      */
