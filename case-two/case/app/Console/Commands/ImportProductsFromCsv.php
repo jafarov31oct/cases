@@ -9,12 +9,26 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 
+
+/**
+ * @phpstan-type ProductRow array{
+ *     merchant_id: int,
+ *     name: string,
+ *     color: string|null,
+ *     ean: string,
+ *     price: string,
+ *     quantity: string,
+ *     created_at: Carbon,
+ *     updated_at: Carbon
+ *     }
+ */
 class ImportProductsFromCsv extends Command implements Isolatable
 {
     protected $signature = 'product:import {merchant : The Merchant Id} {file}';
@@ -84,8 +98,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
             $batch[] = $this->mapRow($row, $merchantId);
 
             if (count($batch) === self::BATCH_SIZE) {
-                $this->saveProducts($batch);
-                $imported += count($batch);
+                $imported += $this->flushBatch($batch);
                 $batch = [];
             }
 
@@ -93,8 +106,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
         // IF the list shorter than 500 list
         if ($batch != []) {
-            $this->saveProducts($batch); // flush the last, not-full batch
-            $imported += count($batch);
+            $imported += $this->flushBatch($batch);
         }
 
         return new ImportResult($imported, $errors);
@@ -214,14 +226,16 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
-     * @param list<array<string, mixed>> $products
+     * @param list<ProductRow> $batch
      */
-    private function saveProducts(array $products): void
+    private function flushBatch(array $batch): int
     {
         DB::table('products')->upsert(
-            $products,
+            $batch,
             ['merchant_id', 'ean'],
             ['name', 'color', 'price', 'quantity', 'updated_at']
         );
+
+        return count($batch);
     }
 }
