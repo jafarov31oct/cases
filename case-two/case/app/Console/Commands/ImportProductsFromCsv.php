@@ -59,6 +59,36 @@ class ImportProductsFromCsv extends Command
     }
 
     /**
+     * @param array $row
+     */
+    private function validateRow(array $row): ?string
+    {
+        if (count($row) !== 5) {
+            return 'expected 5 columns, got ' . count($row);
+        }
+
+        [$name, $color, $ean, $price, $quantity] = array_map(trim(...), $row);
+
+        if ($name === '') {
+            return "name is empty";
+        }
+
+        if (!ctype_digit($ean) || strlen($ean) < 8 || strlen($ean) > 14) {
+            return "invalid ean '{$ean}'";
+        }
+
+        if (!is_numeric($price) || (float)$price < 0) {
+            return "invalid price '{$price}'";
+        }
+
+        if (!ctype_digit($quantity)) {
+            return "invalid quantity '{$quantity}'";
+        }
+
+        return null;
+    }
+
+    /**
      * Opens the merchant's CSV file as a stream (local disk today, S3 later).
      * @return resource
      */
