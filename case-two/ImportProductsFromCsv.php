@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * example $schedule->command('product:import 1 merchant_01.csv --isolated')->everyFiveMinutes();
  */
-
+namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
