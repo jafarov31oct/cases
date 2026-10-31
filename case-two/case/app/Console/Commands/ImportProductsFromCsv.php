@@ -4,14 +4,22 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Console\Isolatable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
-class ImportProductsFromCsv extends Command
+class ImportProductsFromCsv extends Command implements Isolatable
 {
     protected $signature = 'product:import {merchant : The Merchant Id} {file}';
     protected $description = 'Import products from CSV';
+
+    private const int BATCH_SIZE = 500;
+
+    public function isolatableId(): string
+    {
+        return $this->argument('merchant');
+    }
 
     /**
      * Execute the console command.
@@ -31,6 +39,7 @@ class ImportProductsFromCsv extends Command
 
         $lineNumber = 0;
         $imported = 0;
+        $batch = [];
 
         try {
             while (($row = fgetcsv($stream, escape: '')) !== false) {
@@ -40,16 +49,29 @@ class ImportProductsFromCsv extends Command
                     continue; // blank line: not an error, just skip
                 }
 
-                if (count($row) !== 5) {
-                    $this->warn("Line {$lineNumber}: expected 5 columns, got " . count($row));
+                $error = $this->validateRow($row);
+                if ($error !== null) {
+                    $this->warn("Line {$lineNumber}: {$error}");
                     continue;
                 }
 
-                $product = $this->mapRow($row, $merchantId);
-                $this->saveProducts($product);
-                $imported++;
+                $batch[] = $this->mapRow($row, $merchantId);
+
+                if (count($batch) === self::BATCH_SIZE) {
+                    $this->saveProducts($batch);
+                    $imported += count($batch);
+                    $batch = [];
+                }
+
 
             }
+
+            // IF the list shorter than 500 list
+            if ($batch != []) {
+                $this->saveProducts($batch); // flush the last, not-full batch
+                $imported += count($batch);
+            }
+
         } finally {
             fclose($stream);
         }
@@ -155,7 +177,7 @@ class ImportProductsFromCsv extends Command
     private function saveProducts(array $products): void
     {
         DB::table('products')->upsert(
-            [$products],
+            $products,
             ['merchant_id', 'ean'],
             ['name', 'color', 'price', 'quantity', 'updated_at']
         );
