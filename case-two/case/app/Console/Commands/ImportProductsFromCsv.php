@@ -16,7 +16,6 @@ use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 
-
 /**
  * @phpstan-type ProductRow array{
  *     merchant_id: int,
@@ -84,8 +83,10 @@ class ImportProductsFromCsv extends Command implements Isolatable
         while (($row = fgetcsv($stream, escape: '')) !== false) {
             $lineNumber++;
 
-            if ($row === [null]) {
-                continue; // blank line: not an error, just skip
+            $row = $this->normalizeRow($row);
+
+            if ($row === null) {
+                continue;
             }
 
             $error = $this->validateRow($row);
@@ -104,8 +105,8 @@ class ImportProductsFromCsv extends Command implements Isolatable
 
         }
 
-        // IF the list shorter than 500 list
-        if ($batch != []) {
+        // flush the last, not-full batch
+        if ($batch !== []) {
             $imported += $this->flushBatch($batch);
         }
 
@@ -119,19 +120,25 @@ class ImportProductsFromCsv extends Command implements Isolatable
             $this->table(['Line', 'Reason'], $result->errors);
         }
 
-        if ($result->imported === 0) {
-            $this->error('No rows were imported.');
-        }
-
-        Log::info('Product import finished', [
+        $context = [
             'merchant_id' => $merchantId,
             'imported' => $result->imported,
             'skipped' => count($result->errors),
-        ]);
+        ];
+
+        if ($result->imported === 0) {
+            $this->error('No rows were imported.');
+            Log::error('Product import failed: nothing imported', $context);
+            return;
+        }
+
+        Log::info('Product import finished', $context);
     }
 
     /**
-     * @param array<int, string|null> $row
+     * Row is already normalized: trimmed, blank lines skipped.
+     *
+     * @param list<string> $row
      */
     private function validateRow(array $row): ?string
     {
@@ -139,7 +146,7 @@ class ImportProductsFromCsv extends Command implements Isolatable
             return 'expected 5 columns, got ' . count($row);
         }
 
-        [$name, $color, $ean, $price, $quantity] = array_map(trim(...), $row);
+        [$name, $color, $ean, $price, $quantity] = $row;
 
         if ($name === '') {
             return "name is empty";
@@ -177,12 +184,12 @@ class ImportProductsFromCsv extends Command implements Isolatable
             throw new RuntimeException("File {$file} does not exists.");
         }
 
-        // If it is null throw and Exception.
+        // If it is null throw an exception.
         return $disk->readStream($path)
             ?? throw new RuntimeException("File {$file} is not readable. Could not opne it");
     }
 
-    /*
+    /**
      * Get Merchant id and check exist in database or not
      */
     private function getMerchantId(): int
@@ -204,12 +211,14 @@ class ImportProductsFromCsv extends Command implements Isolatable
     }
 
     /**
-     * @param array<int, string|null> $row
-     * @return array<string, mixed>
+     * Row is already validated by validateRow().
+     *
+     * @param list<string> $row
+     * @return ProductRow
      */
     private function mapRow(array $row, int $merchantId): array
     {
-        [$name, $color, $ean, $price, $quantity] = array_map(trim(...), $row);
+        [$name, $color, $ean, $price, $quantity] = $row;
 
         $now = now(); // one time
 
@@ -237,5 +246,18 @@ class ImportProductsFromCsv extends Command implements Isolatable
         );
 
         return count($batch);
+    }
+
+    /**
+     * @param list<string|null> $row
+     * @return list<string>|null  null = blank line, skip it
+     */
+    private function normalizeRow(array $row): ?array
+    {
+        if ($row === [null]) {
+            return null; // blank line: not an error, just skip
+        }
+
+        return array_map(static fn(?string $value): string => trim($value ?? ''), $row);
     }
 }
